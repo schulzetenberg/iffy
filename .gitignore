@@ -1,0 +1,26 @@
+# Secrets file
+Sources/Iffy/Resources/Secrets.plist
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcshareddata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Build outputs
+build/
+Iffy.app/
+.github/copilot-instructions.md
