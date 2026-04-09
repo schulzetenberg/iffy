@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Iffy</string>
+    <string name="notification_channel_name">Playback Controls</string>
+    <string name="notification_channel_description">Shows current track and playlist actions</string>
+</resources>
