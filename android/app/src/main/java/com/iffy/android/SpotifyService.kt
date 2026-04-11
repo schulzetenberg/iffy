@@ -13,14 +13,12 @@ import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class SpotifyService : Service() {
@@ -31,6 +29,7 @@ class SpotifyService : Service() {
         const val ACTION_REMOVE_SKIP = "com.iffy.android.action.REMOVE_SKIP"
         const val ACTION_FAVORITE = "com.iffy.android.action.FAVORITE"
         const val ACTION_SKIP = "com.iffy.android.action.SKIP"
+        const val ACTION_REFRESH = "com.iffy.android.action.REFRESH"
 
         const val CHANNEL_ID = "iffy_playback"
         const val NOTIFICATION_ID = 1
@@ -46,7 +45,6 @@ class SpotifyService : Service() {
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var pollingJob: Job? = null
     private lateinit var api: SpotifyApi
 
     override fun onCreate() {
@@ -58,7 +56,7 @@ class SpotifyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val notification = createNotification(null)
+                val notification = createNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                     startForeground(
                         NOTIFICATION_ID, notification,
@@ -67,13 +65,12 @@ class SpotifyService : Service() {
                 } else {
                     startForeground(NOTIFICATION_ID, notification)
                 }
-                startPolling()
             }
             ACTION_STOP -> {
-                stopPolling()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
+            ACTION_REFRESH -> scope.launch { fetchNowPlaying() }
             ACTION_REMOVE_SKIP -> scope.launch { handleRemoveSkip() }
             ACTION_FAVORITE -> scope.launch { handleFavorite() }
             ACTION_SKIP -> scope.launch { handleSkip() }
@@ -91,27 +88,10 @@ class SpotifyService : Service() {
         _lastAction.value = null
     }
 
-    // --- Polling ---
-
-    private fun startPolling() {
-        pollingJob?.cancel()
-        pollingJob = scope.launch {
-            while (isActive) {
-                fetchNowPlaying()
-                delay(5_000)
-            }
-        }
-    }
-
-    private fun stopPolling() {
-        pollingJob?.cancel()
-    }
-
     private suspend fun fetchNowPlaying() {
         try {
             val state = api.getPlayerState()
             _playbackState.value = state
-            updateNotification(state)
         } catch (e: Exception) {
             Log.e("SpotifyService", "Failed to fetch now playing", e)
         }
@@ -120,15 +100,21 @@ class SpotifyService : Service() {
     // --- Action handlers ---
 
     private suspend fun handleRemoveSkip() {
-        val state = _playbackState.value ?: return
-        val trackUri = state.item?.uri ?: return
-        val playlistUri = state.context?.uri ?: return
-        if (state.context.type != "playlist") return
-
-        val playlistId = playlistUri.removePrefix("spotify:playlist:")
-
         try {
             _lastAction.value = "Removing..."
+
+            val state = api.getPlayerState()
+            val trackUri = state?.item?.uri
+            val playlistUri = state?.context?.uri
+
+            if (trackUri == null || playlistUri == null || state?.context?.type != "playlist") {
+                _lastAction.value = "Not playing from a playlist"
+                delay(2_000)
+                _lastAction.value = null
+                return
+            }
+
+            val playlistId = playlistUri.removePrefix("spotify:playlist:")
             api.removeTracksFromPlaylist(playlistId, listOf(trackUri))
             api.skipToNext()
             delay(300)
@@ -151,9 +137,6 @@ class SpotifyService : Service() {
     }
 
     private suspend fun handleFavorite() {
-        val state = _playbackState.value ?: return
-        val trackUri = state.item?.uri ?: return
-
         val prefs = getSharedPreferences("iffy_prefs", Context.MODE_PRIVATE)
         val defaultPlaylistId = prefs.getString("default_playlist_id", "") ?: ""
         if (defaultPlaylistId.isEmpty()) {
@@ -165,6 +148,16 @@ class SpotifyService : Service() {
 
         try {
             _lastAction.value = "Adding to favorites..."
+
+            val state = api.getPlayerState()
+            val trackUri = state?.item?.uri
+            if (trackUri == null) {
+                _lastAction.value = "No track playing"
+                delay(2_000)
+                _lastAction.value = null
+                return
+            }
+
             api.addTracksToPlaylist(defaultPlaylistId, listOf(trackUri))
 
             val currentPlaylistUri = state.context?.uri
@@ -193,6 +186,8 @@ class SpotifyService : Service() {
             api.skipToNext()
             delay(500)
             fetchNowPlaying()
+            _lastAction.value = "Skipped"
+            delay(2_000)
             _lastAction.value = null
         } catch (e: Exception) {
             Log.e("SpotifyService", "Skip failed", e)
@@ -204,13 +199,7 @@ class SpotifyService : Service() {
 
     // --- Notification ---
 
-    private fun updateNotification(state: PlaybackState?) {
-        val notification = createNotification(state)
-        val manager = getSystemService(android.app.NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification)
-    }
-
-    private fun createNotification(state: PlaybackState?): Notification {
+    private fun createNotification(): Notification {
         val openAppIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).apply {
@@ -225,37 +214,15 @@ class SpotifyService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-
-        val track = state?.item
-        if (track != null) {
-            val artistText = track.artists?.joinToString(", ") { it.name } ?: ""
-            builder.setContentTitle(track.name)
-            builder.setContentText(artistText)
-
-            val isFromPlaylist = state.context?.type == "playlist"
-            if (isFromPlaylist) {
-                builder.setSubText("Playing from playlist")
-            }
-
-            var actionIndex = 0
-            if (isFromPlaylist) {
-                builder.addAction(buildAction(ACTION_REMOVE_SKIP, "Remove+Skip", R.drawable.ic_remove, 1))
-                actionIndex++
-            }
-            builder.addAction(buildAction(ACTION_FAVORITE, "Favorite", R.drawable.ic_favorite, 2))
-            actionIndex++
-            builder.addAction(buildAction(ACTION_SKIP, "Skip", R.drawable.ic_skip_next, 3))
-            actionIndex++
-
-            val compactView = if (isFromPlaylist) intArrayOf(0, 1, 2) else intArrayOf(0, 1)
-            builder.setStyle(
+            .setContentTitle("Iffy")
+            .setContentText("Spotify controls ready")
+            .addAction(buildAction(ACTION_REMOVE_SKIP, "Remove+Skip", R.drawable.ic_remove, 1))
+            .addAction(buildAction(ACTION_FAVORITE, "Favorite", R.drawable.ic_favorite, 2))
+            .addAction(buildAction(ACTION_SKIP, "Skip", R.drawable.ic_skip_next, 3))
+            .setStyle(
                 MediaNotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(*compactView)
+                    .setShowActionsInCompactView(0, 1, 2)
             )
-        } else {
-            builder.setContentTitle("Iffy")
-            builder.setContentText("Waiting for playback...")
-        }
 
         return builder.build()
     }

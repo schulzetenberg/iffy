@@ -56,6 +56,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (tokenManager.isLoggedIn && SpotifyService.isRunning.value) {
+            refreshSpotifyState()
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleOAuthCallback(intent)
@@ -118,6 +125,13 @@ class MainActivity : ComponentActivity() {
     private fun stopSpotifyService() {
         val intent = Intent(this, SpotifyService::class.java).apply {
             action = SpotifyService.ACTION_STOP
+        }
+        startService(intent)
+    }
+
+    private fun refreshSpotifyState() {
+        val intent = Intent(this, SpotifyService::class.java).apply {
+            action = SpotifyService.ACTION_REFRESH
         }
         startService(intent)
     }

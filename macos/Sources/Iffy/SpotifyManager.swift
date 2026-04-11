@@ -54,7 +54,6 @@ final class SpotifyManager: ObservableObject {
 
     let spotify: SpotifyAPI<AuthorizationCodeFlowPKCEManager>
     private var cancellables = Set<AnyCancellable>()
-    private var pollingTimer: Timer?
 
     // MARK: - Initialization
 
@@ -91,7 +90,6 @@ final class SpotifyManager: ObservableObject {
         if isAuthorized {
             Task {
                 await fetchPlaylists()
-                startPollingNowPlaying()
             }
         }
     }
@@ -101,7 +99,6 @@ final class SpotifyManager: ObservableObject {
         currentTrack = nil
         currentPlaylistURI = nil
         playlists = []
-        stopPollingNowPlaying()
         try? KeychainManager.shared.deleteAuthorizationData()
     }
 
@@ -149,7 +146,6 @@ final class SpotifyManager: ObservableObject {
 
             if isAuthorized {
                 await fetchPlaylists()
-                startPollingNowPlaying()
             }
         } catch {
             print("Token refresh failed: \(error)")
@@ -207,29 +203,6 @@ final class SpotifyManager: ObservableObject {
 
     func signOut() {
         spotify.authorizationManager.deauthorize()
-    }
-
-    // MARK: - Now Playing Polling
-
-    private func startPollingNowPlaying() {
-        stopPollingNowPlaying()
-
-        // Poll every 5 seconds
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.fetchNowPlaying()
-            }
-        }
-
-        // Fetch immediately
-        Task {
-            await fetchNowPlaying()
-        }
-    }
-
-    private func stopPollingNowPlaying() {
-        pollingTimer?.invalidate()
-        pollingTimer = nil
     }
 
     // MARK: - API Methods
@@ -293,6 +266,8 @@ final class SpotifyManager: ObservableObject {
 
     /// Remove current track from its playlist and skip to next
     func removeAndSkip() async -> Bool {
+        await fetchNowPlaying()
+
         guard let track = currentTrack,
               let trackURI = track.uri,
               let playlistURI = currentPlaylistURI else {
@@ -351,6 +326,8 @@ final class SpotifyManager: ObservableObject {
 
     /// Add current track to a playlist, optionally removing from current playlist
     func addToPlaylist(_ targetPlaylistId: String, removeFromCurrent: Bool) async -> Bool {
+        await fetchNowPlaying()
+
         guard let track = currentTrack,
               let trackURI = track.uri else {
             lastError = "No track currently playing"

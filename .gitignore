@@ -1,5 +1,8 @@
-# Secrets file
-Sources/Iffy/Resources/Secrets.plist
+# Secrets
+macos/Sources/Iffy/Resources/Secrets.plist
+android/secrets.properties
+android/local.properties
+
 # Xcode
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
@@ -14,6 +17,10 @@ DerivedData/
 .build/
 .swiftpm/
 Package.resolved
+
+# Android
+*.iml
+.gradle/
 
 # macOS
 .DS_Store

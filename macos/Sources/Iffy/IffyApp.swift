@@ -21,8 +21,21 @@ struct IffyApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Setup global keyboard shortcuts
         setupGlobalShortcuts()
+        setupMenuOpenObserver()
+    }
+
+    /// Fetch fresh playback state each time the menu bar menu opens
+    private func setupMenuOpenObserver() {
+        NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                await SpotifyManager.shared.fetchNowPlaying()
+            }
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
