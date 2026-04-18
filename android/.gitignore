@@ -9,3 +9,6 @@
 .externalNativeBuild/
 .cxx/
 secrets.properties
+keystore.properties
+*.keystore
+*.jks

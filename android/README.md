@@ -81,6 +81,86 @@ Skip the properties file entirely. When you first open the app, there's a text f
 5. Grant notification permission when prompted
 6. A persistent notification with action buttons will appear
 
+## Release Build (Self-Signed APK)
+
+If you want to install Iffy on your phone as a proper release build — no debug watermark, stable identity for updates, no need to keep your phone tethered to Android Studio — use the self-signed release flow below.
+
+> **About "Install unknown apps":** Android always requires you to grant "Install unknown apps" permission to whichever app opens a sideloaded APK (your file manager, browser, etc.). This is a platform requirement, not a signing issue — it can't be bypassed by signing. The only way to install without that prompt is via ADB over USB.
+
+### 1. Configure the keystore password
+
+Copy the example file and set your own password:
+
+```bash
+cp android/keystore.properties.example android/keystore.properties
+```
+
+Edit `android/keystore.properties`:
+
+```properties
+storeFile=release.keystore
+storePassword=your-strong-password-here
+keyAlias=iffy-release
+keyPassword=your-strong-password-here
+```
+
+> Both `keystore.properties` and the generated `*.keystore` are gitignored. **Back them up somewhere safe** (password manager, encrypted cloud folder). If you lose the keystore you won't be able to publish updates that install on top of the existing APK — the phone will reject them with a signature mismatch and you'd have to uninstall first (losing app data).
+
+### 2. Build the signed APK
+
+```bash
+bash android/build-signed.sh
+```
+
+On first run the script will:
+
+1. Generate `android/release.keystore` with `keytool` (RSA 2048, 25-year validity)
+2. Locate a Gradle binary (prefers `gradle` on `PATH`, falls back to the Android Studio cached wrapper at `~/.gradle/wrapper/dists/gradle-*-bin/*/gradle-*/bin/gradle`)
+3. Run `gradle :app:assembleRelease`
+4. Verify the signature with `apksigner` from the Android SDK `build-tools`
+
+Subsequent runs reuse the existing keystore. The signed APK will be at:
+
+```
+android/app/build/outputs/apk/release/app-release.apk
+```
+
+> **Prerequisites:** Java 17+, a working Android SDK at `~/Library/Android/sdk` (install via Android Studio), and either a `gradle` on `PATH` or a prior Android Studio Gradle sync so the wrapper cache exists. Run `brew install gradle` if neither is available.
+
+### 3. Install on your phone
+
+You have two options.
+
+#### Option A: ADB over USB (recommended — no "unknown sources" prompt)
+
+1. On your phone, enable **Developer options** (Settings > About phone > tap "Build number" 7 times)
+2. In Developer options, enable **USB debugging**
+3. Plug the phone into your Mac via USB and tap **Allow** on the phone's debugging prompt
+4. Install:
+
+```bash
+~/Library/Android/sdk/platform-tools/adb install -r android/app/build/outputs/apk/release/app-release.apk
+```
+
+The `-r` flag reinstalls over an existing install while keeping app data. On a first install of a differently-signed build, uninstall first: `adb uninstall com.iffy.android`.
+
+#### Option B: File manager transfer
+
+1. Transfer `app-release.apk` to your phone — AirDrop, Google Drive, email, USB-MTP, or `adb push android/app/build/outputs/apk/release/app-release.apk /sdcard/Download/`
+2. On the phone, open your file manager (Files by Google, Samsung My Files, etc.) and tap the APK
+3. Android will prompt: **"For your security, your phone currently isn't allowed to install unknown apps from this source."** Tap **Settings** and toggle **Allow from this source** for your file manager
+4. Go back and tap **Install**
+5. The permission stays granted for that file manager, so future APKs install with one tap
+
+### 4. Updating the app
+
+As long as you always sign with the same `release.keystore`, you can rebuild and install over the previous version without uninstalling — app data and tokens will be preserved.
+
+If you ever see **"App not installed as package conflicts with an existing package"**, it means the signature doesn't match the installed copy. Either:
+
+- Restore the original keystore from backup, or
+- `adb uninstall com.iffy.android` (or uninstall from Settings) — you'll lose tokens and will need to sign in again
+
 ## Usage
 
 ### Notification Controls
@@ -153,3 +233,15 @@ This action only works when Spotify is playing from a playlist context. Albums, 
 ### Token expired / had to re-login
 
 The refresh token was likely revoked (e.g. you revoked app access in Spotify account settings). Sign out and sign in again.
+
+### `build-signed.sh` can't find Gradle
+
+Either install Gradle (`brew install gradle`) or open `android/` once in Android Studio and let it do a Gradle sync — that populates the wrapper cache the script falls back to.
+
+### "App not installed" when installing the APK
+
+Usually a signature conflict with a previously installed version (e.g. a debug build from Android Studio or an older self-signed APK with a different key). Uninstall first: `adb uninstall com.iffy.android` (or uninstall via Settings), then install the new APK.
+
+### Forgot the keystore password
+
+The password is stored in `android/keystore.properties` — check there first. If you've genuinely lost it and lost your backup, you'll need to delete `android/release.keystore`, set a new password in `keystore.properties`, re-run `build-signed.sh` to generate a fresh keystore, and uninstall the app from your phone before installing the newly-signed build.

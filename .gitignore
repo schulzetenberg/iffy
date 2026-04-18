@@ -2,6 +2,9 @@
 macos/Sources/Iffy/Resources/Secrets.plist
 android/secrets.properties
 android/local.properties
+android/keystore.properties
+android/*.keystore
+android/*.jks
 
 # Xcode
 *.xcodeproj/xcuserdata/
